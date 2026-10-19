@@ -89,15 +89,37 @@ describe('POST /participants/:pid/claim', () => {
     expect(row.purchasing_claimed_queue_id).toBe(place);
   });
 
-  it('requires a place in line', async () => {
+  it('claims one person without a place in line', async () => {
     const eventId = insertEvent(h.db);
     const pid = insertParticipant(h.db, eventId);
     seedBuyer(eventId);
 
     const res = await claim(eventId, pid);
 
+    expect(res.status).toBe(200);
+    const row = getParticipant(h.db, pid);
+    expect(row.purchasing_claimed_by).toBe('Tony Nguyen');
+    expect(row.purchasing_claimed_queue_id).toBeNull();
+  });
+
+  it('stops at 3 people claimed outside the line', async () => {
+    const eventId = insertEvent(h.db);
+    seedBuyer(eventId);
+    const held = new Date().toISOString();
+    for (let i = 0; i < 3; i += 1) {
+      insertParticipant(h.db, eventId, {
+        first_name: `Held${i}`,
+        purchasing_claimed_by: 'Tony Nguyen',
+        purchasing_claimed_at: held,
+      });
+    }
+    const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
+
+    const res = await claim(eventId, fourth);
+
     expect(res.status).toBe(400);
-    expect(getParticipant(h.db, pid).purchasing_claimed_by).toBe('');
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('already have 3') });
+    expect(getParticipant(h.db, fourth).purchasing_claimed_by).toBe('');
   });
 
   it('waits until the place is through Queue-It', async () => {

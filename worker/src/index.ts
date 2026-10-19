@@ -603,16 +603,90 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
 
-  const body = await c.req.json<{ coordinator_name: string; queue_id?: number }>();
+  const body = await c.req.json<{ coordinator_name: string; queue_id?: number | null }>();
   if (!body.coordinator_name?.trim()) return err('coordinator_name required');
-  const queueId = Number(body.queue_id);
-  if (!Number.isInteger(queueId) || queueId <= 0) {
-    return err('Pick which place in line you are buying through (refresh if you see this)', 400);
-  }
+  const buyerName = body.coordinator_name.trim();
 
   // Practice mode is client-side only, so claims always require a live purchase window.
   if (event.status !== 'purchasing') {
     return err('Not in purchasing phase', 403);
+  }
+
+  // No place in line: claim this one person for yourself. The saved list and the
+  // Queue-It line stay out of it. Still only 3 at a time, so one person can't lock the board.
+  if (body.queue_id == null) {
+    const p = await c.env.DB.prepare('SELECT * FROM participants WHERE id = ? AND event_id = ?')
+      .bind(pid, eventId).first<Participant>();
+    if (!p) return err('Participant not found', 404);
+    if (p.purchasing_claimed_by && !isClaimExpired(p.purchasing_claimed_at)) {
+      return err(`Already claimed by ${p.purchasing_claimed_by}`, 409);
+    }
+    if (nothingLeftToBuy(p, event)) {
+      return err(`Nothing left to buy for ${p.first_name}: every day they wanted is bought or sold out`, 409);
+    }
+
+    const written = await c.env.DB.prepare(`
+      UPDATE participants
+      SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'),
+          purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
+      WHERE id = ? AND event_id = ?
+        AND (
+          IFNULL(purchasing_claimed_by, '') = ''
+          OR purchasing_claimed_at IS NULL
+          OR datetime(replace(replace(purchasing_claimed_at, 'T', ' '), 'Z', ''))
+              <= datetime('now', '-${CLAIM_TIMEOUT_MINUTES} minutes')
+        )
+        AND (
+          SELECT COUNT(*) FROM participants AS slot
+          WHERE slot.event_id = ?
+            AND IFNULL(slot.purchasing_claimed_queue_id, 0) = 0
+            AND slot.id != ?
+            AND lower(trim(slot.purchasing_claimed_by)) = lower(trim(?))
+            AND IFNULL(slot.purchasing_claimed_by, '') != ''
+            AND slot.purchasing_claimed_at IS NOT NULL
+            AND datetime(replace(replace(slot.purchasing_claimed_at, 'T', ' '), 'Z', ''))
+                > datetime('now', '-${CLAIM_TIMEOUT_MINUTES} minutes')
+            AND (
+              NOT (slot.req_preview = 1 OR slot.req_thu = 1 OR slot.req_fri = 1 OR slot.req_sat = 1 OR slot.req_sun = 1)
+              OR (slot.req_preview = 1 AND slot.pur_preview = 0 AND ? = 0)
+              OR (slot.req_thu = 1 AND slot.pur_thu = 0 AND ? = 0)
+              OR (slot.req_fri = 1 AND slot.pur_fri = 0 AND ? = 0)
+              OR (slot.req_sat = 1 AND slot.pur_sat = 0 AND ? = 0)
+              OR (slot.req_sun = 1 AND slot.pur_sun = 0 AND ? = 0)
+            )
+        ) < ?
+    `).bind(
+      buyerName, pid, eventId,
+      eventId, pid, buyerName,
+      event.sold_out_preview ? 1 : 0,
+      event.sold_out_thu ? 1 : 0,
+      event.sold_out_fri ? 1 : 0,
+      event.sold_out_sat ? 1 : 0,
+      event.sold_out_sun ? 1 : 0,
+      MAX_ACTIVE_CLAIMS,
+    ).run();
+
+    if (!written.meta.changes) {
+      const again = await c.env.DB.prepare('SELECT * FROM participants WHERE id = ? AND event_id = ?')
+        .bind(pid, eventId).first<Participant>();
+      if (!again) return err('Participant not found', 404);
+      if (again.purchasing_claimed_by && !isClaimExpired(again.purchasing_claimed_at)) {
+        return err(`Already claimed by ${again.purchasing_claimed_by}`, 409);
+      }
+      if (nothingLeftToBuy(again, event)) {
+        return err(`Nothing left to buy for ${again.first_name}: every day they wanted is bought or sold out`, 409);
+      }
+      return err(
+        `You already have ${MAX_ACTIVE_CLAIMS} people claimed. Release one before claiming another.`,
+        400,
+      );
+    }
+    return json({ ok: true });
+  }
+
+  const queueId = Number(body.queue_id);
+  if (!Number.isInteger(queueId) || queueId <= 0) {
+    return err('Pick which place in line you are buying through (refresh if you see this)', 400);
   }
 
   const place = await c.env.DB.prepare(

@@ -298,11 +298,11 @@ export const api = {
         headers: authHeaders(clerkToken),
         body: JSON.stringify(data),
       }),
-    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string, queue_id: number) =>
+    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string, queue_id?: number) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim`, {
         method: 'POST',
         headers: authHeaders(clerkToken),
-        body: JSON.stringify({ coordinator_name, queue_id }),
+        body: JSON.stringify(queue_id == null ? { coordinator_name } : { coordinator_name, queue_id }),
       }),
     unclaim: (eventId: number, pid: number, clerkToken: string) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim`, {
