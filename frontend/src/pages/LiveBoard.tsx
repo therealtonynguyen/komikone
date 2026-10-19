@@ -1927,7 +1927,7 @@ function CellContent({
 
     case 'total':
       return (
-        <span className="font-mono text-xs text-gray-800 dark:text-gray-800">
+        <span className="font-mono text-xs text-gray-900 dark:text-gray-100">
           {p.purchase_total > 0 ? formatDollars(p.purchase_total) : '—'}
         </span>
       );
