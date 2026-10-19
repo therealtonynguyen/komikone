@@ -13,6 +13,7 @@ import {
 import { BuyerQueuePanel } from '../components/QueueDraftBoard';
 import { BuyListPanel } from '../components/BuyListPanel';
 import { DaysPanel } from '../components/DaysPanel';
+import { WhoToBuyForPanel } from '../components/WhoToBuyForPanel';
 import { planBuyList } from '../lib/buyPlan';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -538,6 +539,21 @@ export default function LiveBoard() {
     if (missed.length > 0) alert(`Couldn't claim everyone:\n${missed.join('\n')}`);
   };
 
+  /** Lock one person for you. No place in line, and they are not added to your list. */
+  const handleClaimOne = async (p: Participant) => {
+    const meRow = participants.find((x) => x.id === identityId);
+    if (!meRow) { setShowLinkModal(true); return; }
+    const myName = `${meRow.first_name} ${meRow.last_name}`;
+    try {
+      const clerkToken = await getToken({ template: 'komikone' });
+      if (!clerkToken) return;
+      await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
+      await fetchAll();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not claim');
+    }
+  };
+
   const handleUnclaim = async (p: Participant) => {
     try {
       const clerkToken = await getToken({ template: 'komikone' });
@@ -741,6 +757,7 @@ export default function LiveBoard() {
   const needsSetup = participants.filter((p) => !nothingLeftToBuy(p) && purchaseBlockers(p, event).length > 0).length;
 
   const [showNextUp, setShowNextUp] = useState(false);
+  const [showWho, setShowWho] = useState(false);
   const [showDays, setShowDays] = useState(false);
 
   const byDefaultPriority = (a: Participant, b: Participant) => {
@@ -783,13 +800,23 @@ export default function LiveBoard() {
     const slot = placePlan.slots.find((s) => s.place?.id === placeId);
     return slot ? [...slot.claimed, ...slot.upcoming] : [];
   };
-  const claimCapacity = MAX_ACTIVE_CLAIMS * Math.max(1, myPlaces.length);
+  const claimCapacity = MAX_ACTIVE_CLAIMS * (1 + myPlaces.length);
+  const whoSeen = new Set<number>();
+  const whoToBuy: Participant[] = [];
+  for (const p of [...myClaims, ...buyListQuickAdd]) {
+    if (whoSeen.has(p.id)) continue;
+    if (nothingLeftToBuy(p) && !myClaimIds.has(p.id)) continue;
+    whoSeen.add(p.id);
+    whoToBuy.push(p);
+  }
 
-  const openWhosNext = () => { setShowBuyerQueue(false); setShowDays(false); setShowNextUp(true); };
-  const openBuyerQueue = () => { setShowNextUp(false); setShowDays(false); setShowBuyerQueue(true); };
-  const toggleWhosNext = () => { setShowBuyerQueue(false); setShowDays(false); setShowNextUp((v) => !v); };
-  const toggleBuyerQueue = () => { setShowNextUp(false); setShowDays(false); setShowBuyerQueue((v) => !v); };
-  const toggleDays = () => { setShowNextUp(false); setShowBuyerQueue(false); setShowDays((v) => !v); };
+  const closeSides = () => { setShowBuyerQueue(false); setShowDays(false); setShowNextUp(false); setShowWho(false); };
+  const openWhosNext = () => { closeSides(); setShowNextUp(true); };
+  const openBuyerQueue = () => { closeSides(); setShowBuyerQueue(true); };
+  const toggleWhosNext = () => { const next = !showNextUp; closeSides(); if (next) setShowNextUp(true); };
+  const toggleWho = () => { const next = !showWho; closeSides(); if (next) setShowWho(true); };
+  const toggleBuyerQueue = () => { const next = !showBuyerQueue; closeSides(); if (next) setShowBuyerQueue(true); };
+  const toggleDays = () => { const next = !showDays; closeSides(); if (next) setShowDays(true); };
 
   const allCols = [...FROZEN, ...movableCols];
 
@@ -1098,7 +1125,7 @@ export default function LiveBoard() {
         {myDisplayName && (
           <span
             className={`text-xs font-mono ${myClaimCount >= claimCapacity ? 'text-orange-400 font-bold' : 'text-zinc-400'}`}
-            title={`Comic-Con lets each place in line buy for ${MAX_ACTIVE_CLAIMS} people at a time`}
+            title={`Up to ${MAX_ACTIVE_CLAIMS} people at a time on your own, plus ${MAX_ACTIVE_CLAIMS} for each place in line`}
           >
             {myClaimCount}/{claimCapacity} <span className="text-zinc-600 dark:text-zinc-500">yours</span>
           </span>
@@ -1141,20 +1168,35 @@ export default function LiveBoard() {
                   : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
               }`}
             >
-              Get In Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
+              Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
+            </button>
+          )}
+          {me && showPurchaseChrome && (
+            <button
+              type="button"
+              onClick={toggleWhosNext}
+              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+                showNextUp
+                  ? 'bg-yellow-400 text-black border-yellow-200'
+                  : 'text-yellow-300 border-yellow-700 hover:border-yellow-400 hover:text-yellow-200'
+              }`}
+              title="Your saved ranking. Claiming someone does not happen from here."
+            >
+              Lists{buyList.length > 0 ? ` · ${buyList.length}` : ''}
             </button>
           )}
           {me && (showPurchaseChrome ? (
             <button
               type="button"
-              onClick={toggleWhosNext}
+              onClick={toggleWho}
               className={`whitespace-nowrap text-sm font-black uppercase tracking-wide px-3 sm:px-4 py-1.5 rounded-md border-2 transition-colors ${
-                showNextUp
+                showWho
                   ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
                   : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
               }`}
+              title="You, people you added, and your group. Claim one without joining the line."
             >
-              ⚡ Who To Buy For
+              ⚡ Who to buy for
             </button>
           ) : (
             <button
@@ -1477,6 +1519,7 @@ export default function LiveBoard() {
                             buyListRank={listRank.has(p.id) ? listRank.get(p.id)! + 1 : undefined}
                             onAddToBuyList={me && canAddToBuyList(p, event) ? (x) => void saveBuyList([...buyList, x.id]) : undefined}
                             onOpenBuyList={openWhosNext}
+                            onClaim={showPurchaseChrome && me && isClaimable(p, event) && !isClaimLive(p, now) ? handleClaimOne : undefined}
                             claimPlaceLabel={p.purchasing_claimed_queue_id != null ? placeLabels.get(p.purchasing_claimed_queue_id) : undefined}
                           />
                         )}
@@ -1529,6 +1572,19 @@ export default function LiveBoard() {
             canEdit={identityId != null || isPlatformAdmin}
             onToggle={handleSoldOut}
             onDismiss={() => setShowDays(false)}
+          />
+        )}
+
+        {showPurchaseChrome && showWho && me && (
+          <WhoToBuyForPanel
+            people={whoToBuy}
+            event={event}
+            myDisplayName={myDisplayName}
+            now={now}
+            reasonFor={(p) => priorityReason(p, me, identityId)}
+            onClaim={handleClaimOne}
+            onRelease={async (p) => { await handleUnclaim(p); }}
+            onDismiss={() => setShowWho(false)}
           />
         )}
 
@@ -1616,7 +1672,7 @@ function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
   blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
   canMarkUnrequested,
-  buyListRank, onAddToBuyList, onOpenBuyList, claimPlaceLabel,
+  buyListRank, onAddToBuyList, onOpenBuyList, onClaim, claimPlaceLabel,
 }: {
   col: ColKey;
   p: Participant;
@@ -1642,6 +1698,8 @@ function CellContent({
   /** Omitted when you can't keep a buy list (no linked identity). */
   onAddToBuyList?: (p: Participant) => void;
   onOpenBuyList: () => void;
+  /** Claim this one person without a place in line. Omitted when they can't be claimed. */
+  onClaim?: (p: Participant) => void;
   /** Name of the place in line this person's claim is being bought through. */
   claimPlaceLabel?: string;
 }) {
@@ -1923,16 +1981,29 @@ function CellContent({
           </div>
         );
       }
-      return buyListRank != null ? (
-        <button
-          type="button"
-          onClick={onOpenBuyList}
-          className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 hover:underline"
-        >
-          On your list
-        </button>
-      ) : (
-        <span className="text-xs text-gray-400 dark:text-gray-500">Available</span>
+      return (
+        <div className="flex flex-col items-start gap-0.5">
+          {onClaim && (
+            <button
+              type="button"
+              onClick={() => onClaim(p)}
+              className="text-[11px] font-bold text-white bg-orange-600 hover:bg-orange-500 px-2 py-0.5 rounded"
+            >
+              Claim
+            </button>
+          )}
+          {buyListRank != null ? (
+            <button
+              type="button"
+              onClick={onOpenBuyList}
+              className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 hover:underline"
+            >
+              On your list
+            </button>
+          ) : (
+            <span className="text-xs text-gray-400 dark:text-gray-500">Available</span>
+          )}
+        </div>
       );
 
     case 'total':
