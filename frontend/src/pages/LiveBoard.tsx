@@ -1856,17 +1856,13 @@ function CellContent({
             title="Every day they wanted is sold out, so there's nothing to buy for them"
           >
             ✕ Sold out
-            <span className="font-normal text-zinc-500">· {p.sold_out_gaps!.join(', ')}</span>
           </span>
         );
       }
       if (status === 'complete') {
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
-            ✓ Done
-            {(p.sold_out_gaps?.length ?? 0) > 0 && (
-              <span className="font-normal text-zinc-500">· {p.sold_out_gaps!.join(', ')} sold out</span>
-            )}
+            {(p.sold_out_gaps?.length ?? 0) > 0 ? '✓ Done - With Gaps' : '✓ Done'}
           </span>
         );
       }

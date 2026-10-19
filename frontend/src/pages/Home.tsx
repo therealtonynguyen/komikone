@@ -813,12 +813,12 @@ function EventCard({ event }: { event: EventSummary }) {
         >
           {isPurchasing ? 'Open Live Board →' : 'View Live Board →'}
         </Link>
-        {(isPayment || isPurchasing) && (
+        {(isPayment || isPurchasing || event.status === 'complete') && (
           <Link
             to={`/payment/${event.id}`}
             className="font-bangers tracking-wide text-base bg-purple-600 hover:bg-purple-700 text-white px-5 py-1.5 border-2 border-purple-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
           >
-            Payment Info →
+            Who to pay →
           </Link>
         )}
       </div>
