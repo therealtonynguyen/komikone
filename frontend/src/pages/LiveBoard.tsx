@@ -1831,17 +1831,19 @@ function CellContent({
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <div
                   className={`w-4 h-4 rounded-sm border-2 flex items-center justify-center text-[9px] font-black leading-none ${
-                    isGap
-                      ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
-                      : isSoldOutGap
-                        ? 'bg-zinc-300 border-zinc-400 text-zinc-600 dark:bg-zinc-700 dark:border-zinc-500 dark:text-zinc-300'
-                        : 'border-gray-200 dark:border-gray-300'
+                    isGap || isSoldOutGap
+                      ? 'bg-red-500 border-red-600 text-white dark:bg-red-500 dark:border-red-400'
+                      : 'border-gray-200 dark:border-gray-300'
                   }`}
-                  title={isSoldOutGap ? 'Wanted, but sold out' : undefined}
+                  title={isSoldOutGap ? 'Wanted, but sold out' : isGap ? 'Still needed' : undefined}
                 >
                   {isSoldOutGap ? '✕' : null}
                 </div>
-                <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
+                <span className={`text-[7px] leading-none ${
+                  isGap || isSoldOutGap
+                    ? 'font-bold text-red-600 dark:text-red-400'
+                    : 'text-gray-400 dark:text-gray-600'
+                }`}>{DAY_SHORT[day]}</span>
               </div>
             );
           })}
@@ -1860,9 +1862,17 @@ function CellContent({
         );
       }
       if (status === 'complete') {
+        const withGaps = (p.sold_out_gaps?.length ?? 0) > 0;
         return (
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
-            {(p.sold_out_gaps?.length ?? 0) > 0 ? '✓ Done - With Gaps' : '✓ Done'}
+          <span className="inline-flex items-center gap-1 text-xs font-semibold">
+            <span className="text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
+              ✓ Done
+            </span>
+            {withGaps && (
+              <span className="text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-300 dark:border-red-700 px-2 py-0.5 rounded-full">
+                With Gaps
+              </span>
+            )}
           </span>
         );
       }
