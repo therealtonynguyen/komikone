@@ -464,6 +464,35 @@ describe('PATCH /participants/:pid/purchased', () => {
     expect(getParticipant(h.db, pid).req_sun).toBe(0);
   });
 
+  it('records a different purchaser per day without claiming the person', async () => {
+    const eventId = insertEvent(h.db);
+    const pid = insertParticipant(h.db, eventId, { req_sat: 1, req_sun: 1 });
+
+    const sat = await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      asAdmin: true,
+      body: JSON.stringify({ pur_sat: true, who_sat: 'Henry Garcia' }),
+    });
+    expect(sat.status).toBe(200);
+
+    const sun = await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      asAdmin: true,
+      body: JSON.stringify({ pur_sun: true, who_sun: 'A friend' }),
+    });
+    expect(sun.status).toBe(200);
+
+    const row = getParticipant(h.db, pid);
+    expect(row.pur_sat).toBe(1);
+    expect(row.pur_sun).toBe(1);
+    expect(row.who_sat).toBe('Henry Garcia');
+    expect(row.who_sun).toBe('A friend');
+    expect(row.who_purchased).toBe('Henry Garcia / A friend');
+    expect(row.purchasing_claimed_by).toBe('');
+  });
+
   it('lets the buyer on record correct days after the claim auto-released', async () => {
     const eventId = insertEvent(h.db);
     seedBuyer(eventId);

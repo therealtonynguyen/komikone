@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS participants (
   pur_sat INTEGER NOT NULL DEFAULT 0,
   pur_sun INTEGER NOT NULL DEFAULT 0,
   who_purchased TEXT NOT NULL DEFAULT '',
+  who_preview TEXT NOT NULL DEFAULT '',
+  who_thu TEXT NOT NULL DEFAULT '',
+  who_fri TEXT NOT NULL DEFAULT '',
+  who_sat TEXT NOT NULL DEFAULT '',
+  who_sun TEXT NOT NULL DEFAULT '',
   -- Payment
   paid INTEGER NOT NULL DEFAULT 0,
   -- Auth linkage (nullable — family members may have no account)
