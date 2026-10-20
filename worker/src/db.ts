@@ -66,6 +66,11 @@ export type Participant = {
   pur_sat: number;
   pur_sun: number;
   who_purchased: string;
+  who_preview: string;
+  who_thu: string;
+  who_fri: string;
+  who_sat: string;
+  who_sun: string;
   paid: number;
   group_id: number | null;
   group_name: string | null;

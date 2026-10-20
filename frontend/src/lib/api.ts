@@ -157,6 +157,12 @@ export type Participant = {
   pur_sat: boolean;
   pur_sun: boolean;
   who_purchased: string;
+  /** Who paid for each day. Empty when that day was not bought, or only the legacy who_purchased name is known. */
+  who_preview?: string;
+  who_thu?: string;
+  who_fri?: string;
+  who_sat?: string;
+  who_sun?: string;
   paid: boolean;
   group_id: number | null;
   group_name: string | null;
@@ -312,7 +318,11 @@ export const api = {
       }),
     updatePurchased: (
       eventId: number, pid: number, clerkToken: string,
-      data: { pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean; pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string }
+      data: {
+        pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean; pur_sat?: boolean; pur_sun?: boolean;
+        who_purchased?: string;
+        who_preview?: string; who_thu?: string; who_fri?: string; who_sat?: string; who_sun?: string;
+      }
     ) =>
       req<{ ok: boolean; claim_released?: boolean }>(`/api/events/${eventId}/participants/${pid}/purchased`, {
         method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),

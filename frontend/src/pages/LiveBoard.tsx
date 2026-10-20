@@ -14,6 +14,7 @@ import { BuyerQueuePanel } from '../components/QueueDraftBoard';
 import { BuyListPanel } from '../components/BuyListPanel';
 import { DaysPanel } from '../components/DaysPanel';
 import { WhoToBuyForPanel } from '../components/WhoToBuyForPanel';
+import { BoughtForCard, buyerLabel } from '../components/BoughtForCard';
 import { planBuyList } from '../lib/buyPlan';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -229,8 +230,8 @@ export default function LiveBoard() {
   /** Your own ranked participant ids for Who To Buy For. */
   const [buyList, setBuyList] = useState<number[]>([]);
   const [showLinkModal, setShowLinkModal] = useState(false);
-  const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
+  const [boughtForId, setBoughtForId] = useState<number | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
   const [practiceBusy, setPracticeBusy] = useState(false);
   const practiceOfRef = useRef<number | null>(null);
@@ -563,6 +564,16 @@ export default function LiveBoard() {
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
 
+  const handleSaveBoughtDay = async (p: Participant, day: SaleDay, bought: boolean, buyer: string) => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
+      [`pur_${day}`]: bought,
+      [`who_${day}`]: bought ? buyer : '',
+    }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
+    await fetchAll();
+  };
+
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
@@ -597,22 +608,6 @@ export default function LiveBoard() {
       [`req_${day}`]: checked,
     }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
     await fetchAll();
-  };
-
-  const handleWhoChange = async (p: Participant, who: string) => {
-    const me = participants.find((x) => x.id === identityId);
-    const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    if (!isPlatformAdmin && !canEditPurchases(p, myDisplayName, now)) {
-      alert('Claim this person first before editing who bought');
-      setEditingRow(null);
-      return;
-    }
-    const clerkToken = await getToken({ template: 'komikone' });
-    if (!clerkToken) return;
-    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, { who_purchased: who })
-      .catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
-    await fetchAll();
-    setEditingRow(null);
   };
 
   // ─── Column reorder ──────────────────────────────────────────────────────────
@@ -1118,6 +1113,17 @@ export default function LiveBoard() {
         </div>
       )}
 
+      {(boardStatus === 'payment' || boardStatus === 'complete') && practiceOf == null && (
+        <div className="bg-purple-700 text-white px-4 py-2.5 shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-purple-300">
+          <span className="text-sm">
+            Purchases are done. Your dashboard has who you owe, and what to do next.
+          </span>
+          <Link to="/dashboard" className="text-sm font-bold underline hover:no-underline sm:ml-auto">
+            Go to dashboard
+          </Link>
+        </div>
+      )}
+
       {/* ── Stats bar ── */}
       <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-3 sm:px-4 py-1 flex flex-wrap items-center gap-x-4 sm:gap-x-5 gap-y-1 shrink-0">
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
@@ -1356,6 +1362,22 @@ export default function LiveBoard() {
             />
           )}
 
+          {boughtForId != null && (() => {
+            const person = participants.find((p) => p.id === boughtForId);
+            if (!person) return null;
+            return (
+              <BoughtForCard
+                person={person}
+                people={participants}
+                canRecord={isPlatformAdmin || canEditPurchases(person, myDisplayName, now)}
+                canMarkUnrequested={isPlatformAdmin}
+                now={now}
+                onSaveDay={(day, bought, buyer) => handleSaveBoughtDay(person, day, bought, buyer)}
+                onClose={() => setBoughtForId(null)}
+              />
+            );
+          })()}
+
           {/* ── Table ── */}
           <div className="flex-1 overflow-auto">
             <table className="text-sm w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
@@ -1503,8 +1525,6 @@ export default function LiveBoard() {
                             status={status}
                             eventStatus={boardStatus}
                             naturalIdx={naturalIdx}
-                            editingRow={editingRow}
-                            setEditingRow={setEditingRow}
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
                             canTogglePurchase={isPlatformAdmin || canEditPurchases(p, myDisplayName, now)}
@@ -1514,12 +1534,12 @@ export default function LiveBoard() {
                             onUnclaim={handleUnclaim}
                             onRequestedToggle={handleRequestedToggle}
                             onPurchaseToggle={handlePurchaseToggle}
-                            onWhoChange={handleWhoChange}
                             onEditParticipant={setEditParticipant}
                             buyListRank={listRank.has(p.id) ? listRank.get(p.id)! + 1 : undefined}
                             onAddToBuyList={me && canAddToBuyList(p, event) ? (x) => void saveBuyList([...buyList, x.id]) : undefined}
                             onOpenBuyList={openWhosNext}
                             onClaim={showPurchaseChrome && me && isClaimable(p, event) && !isClaimLive(p, now) ? handleClaimOne : undefined}
+                            onOpenBoughtFor={(person) => setBoughtForId(person.id)}
                             claimPlaceLabel={p.purchasing_claimed_queue_id != null ? placeLabels.get(p.purchasing_claimed_queue_id) : undefined}
                           />
                         )}
@@ -1669,18 +1689,16 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 }
 
 function CellContent({
-  col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
-  blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  col, p, status, eventStatus, canEditRequested, canEditProfile, canTogglePurchase,
+  blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onEditParticipant,
   canMarkUnrequested,
-  buyListRank, onAddToBuyList, onOpenBuyList, onClaim, claimPlaceLabel,
+  buyListRank, onAddToBuyList, onOpenBuyList, onClaim, onOpenBoughtFor, claimPlaceLabel,
 }: {
   col: ColKey;
   p: Participant;
   status: RowStatus;
   eventStatus: string;
   naturalIdx: number;
-  editingRow: number | null;
-  setEditingRow: (id: number | null) => void;
   canEditRequested: boolean;
   canEditProfile: boolean;
   canTogglePurchase: boolean;
@@ -1691,7 +1709,6 @@ function CellContent({
   onUnclaim: (p: Participant) => void;
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onPurchaseToggle: (p: Participant, day: DayKey, checked: boolean) => void;
-  onWhoChange: (p: Participant, who: string) => void;
   onEditParticipant: (p: Participant) => void;
   /** 1-based spot on your buy list; undefined when they're not on it. */
   buyListRank: number | undefined;
@@ -1700,6 +1717,7 @@ function CellContent({
   onOpenBuyList: () => void;
   /** Claim this one person without a place in line. Omitted when they can't be claimed. */
   onClaim?: (p: Participant) => void;
+  onOpenBoughtFor: (p: Participant) => void;
   /** Name of the place in line this person's claim is being bought through. */
   claimPlaceLabel?: string;
 }) {
@@ -1717,7 +1735,11 @@ function CellContent({
     }
 
     case 'first':
-      return <span className="font-semibold">{p.first_name}</span>;
+      return (
+        <button type="button" onClick={() => onOpenBoughtFor(p)} className="font-semibold hover:underline text-left">
+          {p.first_name}
+        </button>
+      );
 
     case 'actions':
       return (
@@ -1764,7 +1786,9 @@ function CellContent({
     case 'last':
       return (
         <CopyCell value={p.last_name}>
-          <span className="font-semibold">{p.last_name}</span>
+          <button type="button" onClick={() => onOpenBoughtFor(p)} className="font-semibold hover:underline text-left">
+            {p.last_name}
+          </button>
         </CopyCell>
       );
 
@@ -2013,25 +2037,18 @@ function CellContent({
         </span>
       );
 
-    case 'who':
-      return editingRow === p.id && canTogglePurchase ? (
-        <WhoInput
-          initial={p.who_purchased}
-          onSave={(val) => onWhoChange(p, val)}
-          onCancel={() => setEditingRow(null)}
-        />
-      ) : canTogglePurchase ? (
+    case 'who': {
+      const label = buyerLabel(p);
+      return (
         <button
-          onClick={() => setEditingRow(p.id)}
-          className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-900"
+          type="button"
+          onClick={() => onOpenBoughtFor(p)}
+          className="text-xs text-left text-gray-800 hover:underline dark:text-gray-100"
         >
-          {p.who_purchased || <span className="italic text-gray-400 dark:text-gray-600">tap to set</span>}
+          {label || <span className="italic text-gray-400 dark:text-gray-500">tap to record</span>}
         </button>
-      ) : (
-        <span className="text-xs text-gray-500 dark:text-gray-500">
-          {p.who_purchased || '—'}
-        </span>
       );
+    }
 
     default:
       return null;
@@ -2238,22 +2255,4 @@ function priorityReason(p: Participant, me: Participant | null, identityId: numb
   if (hardest === 'Fri') return 'Needs Friday — high demand';
   if (p.gaps.length >= 3) return `${p.gaps.length} days still needed`;
   return `${p.gaps.length} gap${p.gaps.length !== 1 ? 's' : ''} remaining`;
-}
-
-function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
-  const [val, setVal] = useState(initial);
-  return (
-    <div className="flex gap-1">
-      <input
-        autoFocus
-        type="text"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') onSave(val); if (e.key === 'Escape') onCancel(); }}
-        className="bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-900 dark:text-gray-50 w-24 focus:outline-none"
-      />
-      <button onClick={() => onSave(val)} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400">✓</button>
-      <button onClick={onCancel} className="text-xs text-gray-400 hover:text-red-600">✕</button>
-    </div>
-  );
 }

@@ -860,6 +860,7 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   const body = await c.req.json<{
     pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean;
     pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string;
+    who_preview?: string; who_thu?: string; who_fri?: string; who_sat?: string; who_sun?: string;
   }>();
 
   // Buyers record the days that were asked for. An admin can also record a substitute
@@ -876,20 +877,43 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   }
 
   // Only the days sent change. Ticking one day must not undo another the client hadn't
-  // refreshed yet, which a full overwrite would.
+  // refreshed yet, which a full overwrite would. Clearing a day clears that day's buyer.
   const flag = (v: boolean | undefined) => (v == null ? null : v ? 1 : 0);
+  const dayBuyer = (day: SaleDay) => {
+    if (body[`pur_${day}`] === false) return '';
+    const named = body[`who_${day}`];
+    return named == null ? null : named.trim();
+  };
   await c.env.DB.prepare(`
     UPDATE participants
     SET pur_preview = COALESCE(?, pur_preview), pur_thu = COALESCE(?, pur_thu),
         pur_fri = COALESCE(?, pur_fri), pur_sat = COALESCE(?, pur_sat), pur_sun = COALESCE(?, pur_sun),
+        who_preview = COALESCE(?, who_preview), who_thu = COALESCE(?, who_thu),
+        who_fri = COALESCE(?, who_fri), who_sat = COALESCE(?, who_sat), who_sun = COALESCE(?, who_sun),
         who_purchased = COALESCE(?, who_purchased), updated_at = datetime('now')
     WHERE id = ? AND event_id = ?
   `).bind(
     flag(body.pur_preview), flag(body.pur_thu), flag(body.pur_fri),
     flag(body.pur_sat), flag(body.pur_sun),
+    dayBuyer('preview'), dayBuyer('thu'), dayBuyer('fri'), dayBuyer('sat'), dayBuyer('sun'),
     body.who_purchased != null ? body.who_purchased.trim() : null,
     pid, eventId,
   ).run();
+
+  const buyers = await c.env.DB.prepare(
+    `SELECT who_preview, who_thu, who_fri, who_sat, who_sun FROM participants WHERE id = ? AND event_id = ?`
+  ).bind(pid, eventId).first<{
+    who_preview: string; who_thu: string; who_fri: string; who_sat: string; who_sun: string;
+  }>();
+  const namedBuyers = SALE_DAYS
+    .map((d) => (buyers?.[`who_${d}`] ?? '').trim())
+    .filter(Boolean)
+    .filter((name, i, all) => all.findIndex((n) => n.toLowerCase() === name.toLowerCase()) === i);
+  if (namedBuyers.length > 0) {
+    await c.env.DB.prepare(
+      `UPDATE participants SET who_purchased = ? WHERE id = ? AND event_id = ?`
+    ).bind(namedBuyers.join(' / '), pid, eventId).run();
+  }
 
   // Finishing someone ends the claim without a manual release. The place link stays when
   // something was bought, so the place still shows them and can't claim past 3.

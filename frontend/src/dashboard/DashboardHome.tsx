@@ -10,9 +10,24 @@ const LIVE_BOARD_STATUS: Record<EventSummary['status'], string> = {
   setup: 'Getting ready for purchase day',
   registration: 'Practice and check your spot before purchase day',
   purchasing: 'Buying is happening now. Jump in.',
-  payment: 'Purchases done. See who bought what.',
-  complete: 'Wrapped up. See the final board.',
+  payment: 'The board is finished. You can still look.',
+  complete: 'The board is finished. You can still look.',
 };
+
+function PaybackTile({ eventId, title }: { eventId: number; title: string }) {
+  return (
+    <Link
+      to={`/payment/${eventId}`}
+      className="block backdrop-blur-md rounded-2xl p-6 shadow-2xl bg-white/90 dark:bg-gray-900/90 border border-purple-300/80 dark:border-purple-800/80 hover:border-purple-400"
+    >
+      <p className="text-purple-600 dark:text-purple-400 text-xs uppercase tracking-wider mb-1">Payback</p>
+      <p className="text-lg font-bold text-gray-900 dark:text-white">{title}</p>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+        See what you owe, who owes you, and how to send it →
+      </p>
+    </Link>
+  );
+}
 
 function LiveBoardTile({ event, hasMemberId }: { event: EventSummary; hasMemberId: boolean }) {
   const live = event.status === 'purchasing';
@@ -97,20 +112,14 @@ export default function DashboardHome() {
     <BackgroundLayer className="flex-1" minHeight="min-h-[calc(100vh)]">
       <div className="flex flex-col justify-end min-h-[calc(100vh)] p-8 md:p-12">
         <div className="max-w-lg space-y-4">
+          {activeEvent && (activeEvent.status === 'payment' || activeEvent.status === 'complete') && (
+            <PaybackTile eventId={activeEvent.id} title="Who you owe" />
+          )}
           {activeEvent && (
             <LiveBoardTile event={activeEvent} hasMemberId={!!member.member_id?.trim()} />
           )}
-          {activeEvent && (activeEvent.status === 'purchasing' || activeEvent.status === 'payment' || activeEvent.status === 'complete') && (
-            <Link
-              to={`/payment/${activeEvent.id}`}
-              className="block backdrop-blur-md rounded-2xl p-6 shadow-2xl bg-white/90 dark:bg-gray-900/90 border border-purple-300/80 dark:border-purple-800/80 hover:border-purple-400"
-            >
-              <p className="text-purple-600 dark:text-purple-400 text-xs uppercase tracking-wider mb-1">Payback</p>
-              <p className="text-lg font-bold text-gray-900 dark:text-white">Who to pay</p>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                See what you owe, who owes you, and how to send it →
-              </p>
-            </Link>
+          {activeEvent && activeEvent.status === 'purchasing' && (
+            <PaybackTile eventId={activeEvent.id} title="Who to pay" />
           )}
           <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-300/80 dark:border-gray-700/80 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 mb-4">
