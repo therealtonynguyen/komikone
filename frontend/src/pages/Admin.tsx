@@ -754,7 +754,16 @@ function OverviewTab({
           <AddEventCard regType="return" year={year} conYear={conYear} pricesFrom={openEvent} auth={auth} onCreated={onUpdate} />
         )}
         {!openEvent && conYear !== null && (
-          <AddEventCard regType="open" year={year} conYear={conYear} pricesFrom={returnEvent} auth={auth} onCreated={onUpdate} />
+          <AddEventCard
+            regType="open"
+            year={year}
+            conYear={conYear}
+            pricesFrom={returnEvent}
+            gapSource={returnEvent}
+            gapPeople={returnParticipants}
+            auth={auth}
+            onCreated={onUpdate}
+          />
         )}
       </div>
     </div>
@@ -766,29 +775,51 @@ const PRICE_KEYS = [
   'price_preview_junior', 'price_thu_junior', 'price_fri_junior', 'price_sat_junior', 'price_sun_junior',
 ] as const;
 
+const GAP_DAYS = ['preview', 'thu', 'fri', 'sat', 'sun'] as const;
+
+/** Asked for a day they never got, including a day that sold out. */
+function missedARequestedDay(p: Participant): boolean {
+  return GAP_DAYS.some((d) => p[`req_${d}`] && !p[`pur_${d}`]);
+}
+
 /** Fills in the year's missing Return or Open Reg event, priced like the event it already has. */
-function AddEventCard({ regType, year, conYear, pricesFrom, auth, onCreated }: {
+function AddEventCard({ regType, year, conYear, pricesFrom, gapSource, gapPeople, auth, onCreated }: {
   regType: 'return' | 'open';
   year: Year | null;
   conYear: number;
   pricesFrom: EventDetail | null;
+  /** Return Reg for this year, when creating Open Reg. */
+  gapSource?: EventDetail | null;
+  gapPeople?: Participant[];
   auth: () => Promise<string>;
   onCreated: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const label = regType === 'return' ? 'Return Reg' : 'Open Reg';
   const name = `${year?.name ?? `SDCC ${conYear}`} ${label}`;
+  const withGaps = regType === 'open' && gapSource ? (gapPeople ?? []).filter(missedARequestedDay) : [];
 
   const handleCreate = async () => {
     if (!confirm(`Create "${name}"? It starts in setup, so nobody sees it until you open registration.`)) return;
+    const copyGaps = withGaps.length > 0 && confirm(
+      `${withGaps.length} ${withGaps.length === 1 ? 'person' : 'people'} from ${gapSource!.name} missed a day they asked for.\n\nCopy them into Open Reg, requesting only those days?\n\nOK copies them. Cancel creates Open Reg without them.`,
+    );
     setLoading(true);
     try {
+      const token = await auth();
       const prices = pricesFrom
         ? Object.fromEntries(PRICE_KEYS.map((k) => [k, pricesFrom[k]]))
         : SDCC_DEFAULTS;
-      await api.admin.events.create(await auth(), {
+      const created = await api.admin.events.create(token, {
         year: conYear, year_id: year?.id ?? null, name, reg_type: regType, status: 'setup', ...prices,
       });
+      if (copyGaps && gapSource) {
+        await api.admin.participants.copy(token, gapSource.id, {
+          target_event_id: created.id,
+          participant_ids: withGaps.map((p) => p.id),
+          carryover: true,
+        });
+      }
       onCreated();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to create event');
@@ -808,7 +839,9 @@ function AddEventCard({ regType, year, conYear, pricesFrom, auth, onCreated }: {
         {loading ? 'Creating…' : `+ Add ${label} event`}
       </button>
       <p className="text-xs text-gray-500 text-center">
-        {pricesFrom ? `Uses the same prices as ${pricesFrom.name}.` : 'Uses default SDCC prices.'} Change them in the Prices tab.
+        {pricesFrom ? `Uses the same prices as ${pricesFrom.name}.` : 'Uses default SDCC prices.'}
+        {withGaps.length > 0 ? ` ${withGaps.length} from Return Reg missed a day and can be copied in.` : ''}
+        {' '}Change prices in the Prices tab.
       </p>
     </div>
   );
