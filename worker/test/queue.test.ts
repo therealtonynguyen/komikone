@@ -146,8 +146,23 @@ describe('PATCH /sold-out', () => {
     expect(((await off.json()) as { sold_out_fri: number }).sold_out_fri).toBe(0);
   });
 
-  it('refuses someone who is not in the event', async () => {
-    expect((await soldOut('user_stranger', { day: 'fri', sold_out: true })).status).toBe(403);
+  it('lets a signed-in helper who is not on the board flip a day', async () => {
+    const on = await soldOut('user_stranger', { day: 'fri', sold_out: true });
+    expect(on.status).toBe(200);
+    expect(((await on.json()) as { sold_out_fri: number }).sold_out_fri).toBe(1);
+  });
+
+  it('lets a helper join the line without a participant row', async () => {
+    const res = await h.request(`/api/events/${eventId}/purchase-queue/join`, {
+      method: 'POST',
+      as: 'user_stranger',
+      body: JSON.stringify({ buyer_name: 'A Helper' }),
+    });
+    expect(res.status).toBe(200);
+    const [place] = (await res.json()) as { clerk_user_id: string; participant_id: number | null; first_name: string }[];
+    expect(place.clerk_user_id).toBe('user_stranger');
+    expect(place.participant_id).toBeNull();
+    expect(place.first_name).toBe('A Helper');
   });
 
   it('rejects a day that is not a sale day', async () => {

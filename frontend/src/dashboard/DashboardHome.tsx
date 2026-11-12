@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDashboard } from './DashboardContext';
 import { badgeTypeLabel } from './styles';
 import BackgroundLayer from '../components/BackgroundLayer';
 import { MemberId } from '../components/MemberId';
-import type { EventSummary } from '../lib/api';
+import { api, type EventSummary } from '../lib/api';
+import { pickLiveBoard } from '../lib/liveBoard';
 import { pendingInvite } from '../lib/pendingInvite';
 
 const LIVE_BOARD_STATUS: Record<EventSummary['status'], string> = {
@@ -29,24 +31,9 @@ function PaybackTile({ eventId, title }: { eventId: number; title: string }) {
   );
 }
 
-function LiveBoardTile({ event, hasMemberId }: { event: EventSummary; hasMemberId: boolean }) {
+function LiveBoardTile({ event }: { event: EventSummary }) {
   const live = event.status === 'purchasing';
   const tile = 'group block backdrop-blur-md rounded-2xl p-6 shadow-2xl transition-colors';
-
-  if (!hasMemberId) {
-    return (
-      <Link
-        to="/dashboard/profile"
-        className={`${tile} bg-amber-50/90 dark:bg-amber-950/80 border border-amber-300/80 dark:border-amber-800/80 hover:border-amber-400`}
-      >
-        <p className="text-amber-600 dark:text-amber-400 text-xs uppercase tracking-wider mb-1">Live Board</p>
-        <p className="text-lg font-bold text-gray-900 dark:text-white">Set your Member ID first</p>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          The Live Board needs it to find you. Add it on your profile →
-        </p>
-      </Link>
-    );
-  }
 
   return (
     <Link
@@ -80,32 +67,49 @@ function LiveBoardTile({ event, hasMemberId }: { event: EventSummary; hasMemberI
   );
 }
 
+function HelperHome() {
+  const [events, setEvents] = useState<EventSummary[]>([]);
+  const invite = pendingInvite();
+
+  useEffect(() => {
+    api.events.list().then(setEvents).catch(() => {});
+  }, []);
+
+  const board = pickLiveBoard(events);
+
+  return (
+    <div className="flex-1 flex items-center justify-center p-8">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-md w-full">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">You can help from here</h1>
+        <p className="text-gray-500 text-sm mt-2">
+          You do not need to be on the participant list. Sign in is enough to claim people, record who bought, and join the line.
+        </p>
+        {board && (
+          <div className="mt-5">
+            <LiveBoardTile event={board} />
+          </div>
+        )}
+        {invite && (
+          <Link
+            to={`/join/${invite}`}
+            className="block mt-5 text-center bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg transition-colors"
+          >
+            Finish joining with your invite →
+          </Link>
+        )}
+        <Link to="/" className="inline-block mt-4 text-sm text-blue-400 hover:text-blue-300">
+          Homepage
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardHome() {
-  const { member, primaryView, activeEvent } = useDashboard();
+  const { member, primaryView, activeEvent, liveBoardEvent } = useDashboard();
 
   if (!member) {
-    const invite = pendingInvite();
-    return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 text-center max-w-md">
-          {invite && (
-            <Link
-              to={`/join/${invite}`}
-              className="block mb-5 bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg transition-colors"
-            >
-              Finish joining with your invite →
-            </Link>
-          )}
-          <p className="text-gray-400">You are not registered for this year yet.</p>
-          <p className="text-gray-500 text-sm mt-2">
-            Use your invite link to join, or request access from the homepage.
-          </p>
-          <Link to="/" className="inline-block mt-4 text-sm text-blue-400 hover:text-blue-300">
-            Go to homepage
-          </Link>
-        </div>
-      </div>
-    );
+    return <HelperHome />;
   }
 
   return (
@@ -115,11 +119,11 @@ export default function DashboardHome() {
           {activeEvent && (activeEvent.status === 'payment' || activeEvent.status === 'complete') && (
             <PaybackTile eventId={activeEvent.id} title="Who you owe" />
           )}
-          {activeEvent && (
-            <LiveBoardTile event={activeEvent} hasMemberId={!!member.member_id?.trim()} />
+          {liveBoardEvent && (
+            <LiveBoardTile event={liveBoardEvent} />
           )}
-          {activeEvent && activeEvent.status === 'purchasing' && (
-            <PaybackTile eventId={activeEvent.id} title="Who to pay" />
+          {liveBoardEvent && liveBoardEvent.status === 'purchasing' && (
+            <PaybackTile eventId={liveBoardEvent.id} title="Who to pay" />
           )}
           <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-300/80 dark:border-gray-700/80 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 mb-4">

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS participants (
   -- Purchasing status
   purchasing_claimed_by TEXT NOT NULL DEFAULT '',
   purchasing_claimed_at TEXT,
+  purchasing_claimed_clerk_user_id TEXT,
   -- Purchased days
   pur_preview INTEGER NOT NULL DEFAULT 0,
   pur_thu INTEGER NOT NULL DEFAULT 0,
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS year_meta (
 CREATE TABLE IF NOT EXISTS purchase_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  participant_id INTEGER NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  participant_id INTEGER REFERENCES participants(id) ON DELETE CASCADE,
+  buyer_name TEXT NOT NULL DEFAULT '',
   clerk_user_id TEXT NOT NULL,
   position INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'waiting'
