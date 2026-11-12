@@ -13,7 +13,7 @@ const NAV = [
 
 function DashboardShell() {
   const {
-    loading, years, selectedYearId, setSelectedYearId, yearObj, error, activeEvent, member,
+    loading, years, selectedYearId, setSelectedYearId, yearObj, error, liveBoardEvent, member,
   } = useDashboard();
 
   const canUseLiveBoard = !!(member?.member_id?.trim());
@@ -54,12 +54,12 @@ function DashboardShell() {
             {label}
           </NavLink>
         ))}
-        {activeEvent && canUseLiveBoard && (
-          <Link to={`/live/${activeEvent.id}`} className={`${base} ${idle}`}>
+        {liveBoardEvent && canUseLiveBoard && (
+          <Link to={`/live/${liveBoardEvent.id}`} className={`${base} ${idle}`}>
             Live Board
           </Link>
         )}
-        {activeEvent && !canUseLiveBoard && member && (
+        {liveBoardEvent && !canUseLiveBoard && member && (
           <Link
             to="/dashboard/profile"
             title="Set your Member ID to open Live Board"

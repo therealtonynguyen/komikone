@@ -243,7 +243,7 @@ export type PurchaseQueueStatus =
 export type PurchaseQueueEntry = {
   id: number;
   event_id: number;
-  participant_id: number;
+  participant_id: number | null;
   clerk_user_id: string;
   position: number;
   status: PurchaseQueueStatus;
@@ -369,9 +369,14 @@ export const api = {
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue`, {
         headers: authHeaders(clerkToken),
       }),
-    join: (eventId: number, clerkToken: string, label?: string) =>
+    join: (eventId: number, clerkToken: string, label?: string, buyerName?: string) =>
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/join`, {
-        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(label ? { label } : {}),
+        method: 'POST',
+        headers: authHeaders(clerkToken),
+        body: JSON.stringify({
+          ...(label ? { label } : {}),
+          ...(buyerName ? { buyer_name: buyerName } : {}),
+        }),
       }),
     rename: (eventId: number, qid: number, clerkToken: string, label: string) =>
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {

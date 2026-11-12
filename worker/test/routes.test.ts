@@ -102,6 +102,29 @@ describe('POST /participants/:pid/claim', () => {
     expect(row.purchasing_claimed_queue_id).toBeNull();
   });
 
+  it('lets a helper who is not on the board claim and record a day', async () => {
+    const eventId = insertEvent(h.db);
+    const pid = insertParticipant(h.db, eventId, { req_sat: 1 });
+    const helper = 'user_helper';
+
+    const claimed = await h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
+      method: 'POST',
+      as: helper,
+      body: JSON.stringify({ coordinator_name: 'A Helper', queue_id: null }),
+    });
+    expect(claimed.status).toBe(200);
+    expect(getParticipant(h.db, pid).purchasing_claimed_clerk_user_id).toBe(helper);
+
+    const bought = await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: helper,
+      body: JSON.stringify({ pur_sat: true, who_sat: 'A Helper' }),
+    });
+    expect(bought.status).toBe(200);
+    expect(getParticipant(h.db, pid).pur_sat).toBe(1);
+    expect(getParticipant(h.db, pid).who_sat).toBe('A Helper');
+  });
+
   it('stops at 3 people claimed outside the line', async () => {
     const eventId = insertEvent(h.db);
     seedBuyer(eventId);

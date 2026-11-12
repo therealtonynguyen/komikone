@@ -235,14 +235,17 @@ export default function LiveBoard() {
   const [flash, setFlash] = useState<Record<number, boolean>>({});
   const [practiceBusy, setPracticeBusy] = useState(false);
   const practiceOfRef = useRef<number | null>(null);
-  /** null = still checking; string = block reason before board access */
-  const [accessBlock, setAccessBlock] = useState<'member_id' | 'return_eligible' | null | undefined>(undefined);
-  const [openLiveEventId, setOpenLiveEventId] = useState<number | null>(null);
+  /** null = board is open; undefined = still checking the signed-in account */
+  const [accessBlock, setAccessBlock] = useState<null | undefined>(undefined);
   const [now, setNow] = useState(() => Date.now());
   const prevIds = useRef<Set<number>>(new Set());
   const expiredFetchRef = useRef(false);
 
   const isPlatformAdmin = user?.publicMetadata?.role === 'admin';
+  /** Name used when this account is helping and has no row on the board. */
+  const accountName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
+    || user?.primaryEmailAddress?.emailAddress?.split('@')[0]
+    || '';
 
   const participants = serverParticipants;
   /** On the shared practice copy: the real event it rehearses. */
@@ -419,72 +422,25 @@ export default function LiveBoard() {
     if (!anyExpiring) expiredFetchRef.current = false;
   }, [now, serverParticipants, fetchAll]);
 
-  // Resolve Clerk identity → participant link, and gate Member ID / return eligibility
+  // A linked participant is optional. Helpers sign in and work the board without a row of their own.
   useEffect(() => {
     if (!eventId || !isSignedIn) return;
     let cancelled = false;
-    setAccessBlock(undefined);
-    setOpenLiveEventId(null);
+    setAccessBlock(null);
 
     getToken({ template: 'komikone' }).then(async (clerkToken) => {
       if (!clerkToken || cancelled) return;
       try {
-        const [res, yearList, eventDetail, allEvents] = await Promise.all([
-          api.participants.getMyIdentity(Number(eventId), clerkToken),
-          api.years.list(clerkToken).catch(() => [] as Awaited<ReturnType<typeof api.years.list>>),
-          api.events.get(Number(eventId), clerkToken).catch(() => null),
-          api.events.list().catch(() => [] as Awaited<ReturnType<typeof api.events.list>>),
-        ]);
-
+        const res = await api.participants.getMyIdentity(Number(eventId), clerkToken);
         if (cancelled) return;
-
-        const conYear = eventDetail?.year;
-        const yearObj = conYear != null ? yearList.find((y) => y.con_year === conYear) : undefined;
-        let yearMemberId = '';
-        let returnEligible = false;
-        if (yearObj) {
-          const memberRes = await api.years.me(yearObj.id, clerkToken).catch(() => null);
-          yearMemberId = memberRes?.member.member_id?.trim() ?? '';
-          returnEligible = !!memberRes?.member.return_eligible;
-        }
-
-        const linkedMemberId = res.linked && res.participant
-          ? (res.participant.member_id?.trim() ?? '')
-          : '';
-        if (res.linked && res.participant) {
-          returnEligible = returnEligible || !!res.participant.return_eligible;
-        }
-
-        const hasMemberId = !!(yearMemberId || linkedMemberId);
-        if (!hasMemberId) {
-          setAccessBlock('member_id');
-          return;
-        }
-
-        // Return Reg board is only for return-eligible members
-        if (eventDetail?.reg_type === 'return' && !returnEligible && !isPlatformAdmin) {
-          const openEvt = allEvents.find(
-            (e) => e.year === conYear && e.reg_type === 'open',
-          );
-          setOpenLiveEventId(openEvt?.id ?? null);
-          setAccessBlock('return_eligible');
-          return;
-        }
-
-        setAccessBlock(null);
-
-        if (res.linked && res.participant) {
-          setIdentityId(res.participant.id);
-        } else {
-          setShowLinkModal(true);
-        }
+        setIdentityId(res.linked && res.participant ? res.participant.id : null);
       } catch {
-        if (!cancelled) setAccessBlock(null);
+        if (!cancelled) setIdentityId(null);
       }
     });
 
     return () => { cancelled = true; };
-  }, [eventId, isSignedIn, isPlatformAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eventId, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!eventId || !isSignedIn) return;
@@ -519,8 +475,11 @@ export default function LiveBoard() {
    */
   const handleClaimMany = async (picks: Participant[], place: PurchaseQueueEntry) => {
     const me = participants.find((x) => x.id === identityId);
-    if (!me) { setShowLinkModal(true); return; }
-    const myName = `${me.first_name} ${me.last_name}`;
+    const myName = (me ? `${me.first_name} ${me.last_name}` : accountName).trim();
+    if (!myName) {
+      alert('Add your name on your account so people can see who is helping.');
+      return;
+    }
     const room = MAX_ACTIVE_CLAIMS - participants.filter(
       (x) => x.purchasing_claimed_queue_id === place.id && holdsClaimSlot(x, myName, now),
     ).length;
@@ -543,8 +502,11 @@ export default function LiveBoard() {
   /** Lock one person for you. No place in line, and they are not added to your list. */
   const handleClaimOne = async (p: Participant) => {
     const meRow = participants.find((x) => x.id === identityId);
-    if (!meRow) { setShowLinkModal(true); return; }
-    const myName = `${meRow.first_name} ${meRow.last_name}`;
+    const myName = (meRow ? `${meRow.first_name} ${meRow.last_name}` : accountName).trim();
+    if (!myName) {
+      alert('Add your name on your account so people can see who is helping.');
+      return;
+    }
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
@@ -576,7 +538,7 @@ export default function LiveBoard() {
 
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
-    const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+    const myDisplayName = (me ? `${me.first_name} ${me.last_name}` : accountName).trim();
     if (!isPlatformAdmin && !canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before marking purchase days');
       return;
@@ -706,7 +668,7 @@ export default function LiveBoard() {
   });
 
   const me = participants.find((p) => p.id === identityId) ?? null;
-  const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+  const myDisplayName = (me ? `${me.first_name} ${me.last_name}` : accountName).trim();
   const myClerkId = user?.id ?? me?.clerk_user_id ?? null;
   // Finished people keep their "who bought" record but stop consuming a slot.
   const myClaimCount = myDisplayName
@@ -856,7 +818,9 @@ export default function LiveBoard() {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     try {
-      await refreshBuyerQueue(await api.purchaseQueue.join(Number(eventId), clerkToken, label));
+      const meRow = participants.find((x) => x.id === identityId);
+      const buyerName = (meRow ? `${meRow.first_name} ${meRow.last_name}` : accountName).trim();
+      await refreshBuyerQueue(await api.purchaseQueue.join(Number(eventId), clerkToken, label, buyerName));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to join queue');
     }
@@ -972,63 +936,6 @@ export default function LiveBoard() {
     return (
       <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center">
         <div className="text-gray-400">Loading...</div>
-      </div>
-    );
-  }
-
-  if (accessBlock === 'member_id') {
-    return (
-      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center px-6">
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-md text-center shadow-xl">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Member ID required</h2>
-          <p className="text-gray-500 text-sm mb-6">
-            Set your Comic-Con Member ID on your profile before joining the Live Board.
-            Coordinators use it to match badges during purchase day.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              to="/dashboard/profile"
-              className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-sm px-5 py-2.5 rounded-lg transition-colors"
-            >
-              Set Member ID →
-            </Link>
-            <Link
-              to="/dashboard"
-              className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-sm px-3 py-2.5"
-            >
-              Back to dashboard
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (accessBlock === 'return_eligible') {
-    return (
-      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center px-6">
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-md text-center shadow-xl">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Return Reg only</h2>
-          <p className="text-gray-500 text-sm mb-6">
-            This Live Board is for return-eligible members. You&apos;re set up for Open registration instead.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            {openLiveEventId != null && (
-              <Link
-                to={`/live/${openLiveEventId}`}
-                className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-sm px-5 py-2.5 rounded-lg transition-colors"
-              >
-                Go to Open Live Board →
-              </Link>
-            )}
-            <Link
-              to="/dashboard"
-              className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-sm px-3 py-2.5"
-            >
-              Back to dashboard
-            </Link>
-          </div>
-        </div>
       </div>
     );
   }
@@ -1570,7 +1477,7 @@ export default function LiveBoard() {
             stale={queueStale}
             myClerkId={user?.id ?? null}
             isAdmin={isPlatformAdmin}
-            identityLinked={identityId != null}
+            identityLinked={!!isSignedIn}
             buyFor={buyForPlace}
             onOpenWhosNext={openWhosNext}
             onJoin={handleQueueJoin}
@@ -1589,13 +1496,13 @@ export default function LiveBoard() {
             event={event}
             participants={participants}
             // Practice mode promises nothing is saved, and this writes to the real event.
-            canEdit={identityId != null || isPlatformAdmin}
+            canEdit={!!isSignedIn || isPlatformAdmin}
             onToggle={handleSoldOut}
             onDismiss={() => setShowDays(false)}
           />
         )}
 
-        {showPurchaseChrome && showWho && me && (
+        {showPurchaseChrome && showWho && myDisplayName && (
           <WhoToBuyForPanel
             people={whoToBuy}
             event={event}

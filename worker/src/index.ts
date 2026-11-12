@@ -159,11 +159,19 @@ async function canActOnClaimedParticipant(
     return !!(await db.prepare('SELECT id FROM participants WHERE id = ? AND event_id = ?').bind(pid, eventId).first());
   }
   const target = await db.prepare(
-    'SELECT purchasing_claimed_by, purchasing_claimed_at, who_purchased FROM participants WHERE id = ? AND event_id = ?'
-  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null; who_purchased: string }>();
+    `SELECT purchasing_claimed_by, purchasing_claimed_at, purchasing_claimed_clerk_user_id, who_purchased
+     FROM participants WHERE id = ? AND event_id = ?`
+  ).bind(pid, eventId).first<{
+    purchasing_claimed_by: string;
+    purchasing_claimed_at: string | null;
+    purchasing_claimed_clerk_user_id: string | null;
+    who_purchased: string;
+  }>();
   if (!target) return false;
 
   const claimActive = !!target.purchasing_claimed_by && !isClaimExpired(target.purchasing_claimed_at);
+  // A helper has no row on the board, so the claim is theirs by account, not by participant name.
+  if (claimActive && target.purchasing_claimed_clerk_user_id === access.userId) return true;
   const buyerOnRecord = target.who_purchased?.trim() ?? '';
   if (!claimActive && !buyerOnRecord) return false;
 
@@ -627,7 +635,8 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
 
     const written = await c.env.DB.prepare(`
       UPDATE participants
-      SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'),
+      SET purchasing_claimed_by = ?, purchasing_claimed_clerk_user_id = ?,
+          purchasing_claimed_at = datetime('now'),
           purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
       WHERE id = ? AND event_id = ?
         AND (
@@ -656,7 +665,7 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
             )
         ) < ?
     `).bind(
-      buyerName, pid, eventId,
+      buyerName, access.userId, pid, eventId,
       eventId, pid, buyerName,
       event.sold_out_preview ? 1 : 0,
       event.sold_out_thu ? 1 : 0,
@@ -735,7 +744,8 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   // re-checks the claim and the 3-person cap in one statement, so the second one loses.
   const written = await c.env.DB.prepare(`
     UPDATE participants
-    SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'),
+    SET purchasing_claimed_by = ?, purchasing_claimed_clerk_user_id = ?,
+        purchasing_claimed_at = datetime('now'),
         purchasing_claimed_queue_id = ?, updated_at = datetime('now')
     WHERE id = ? AND event_id = ?
       AND (
@@ -768,7 +778,7 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
           )
       ) < ?
   `).bind(
-    body.coordinator_name.trim(), queueId, pid, eventId,
+    body.coordinator_name.trim(), access.userId, queueId, pid, eventId,
     eventId, queueId, pid,
     event.sold_out_preview ? 1 : 0,
     event.sold_out_thu ? 1 : 0,
@@ -804,8 +814,12 @@ app.post('/api/events/:id/participants/:pid/unclaim', async (c) => {
   if (!access) return err('Authentication required', 401);
 
   const target = await c.env.DB.prepare(
-    'SELECT purchasing_claimed_by, purchasing_claimed_queue_id FROM participants WHERE id = ? AND event_id = ?'
-  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_queue_id: number | null }>();
+    'SELECT purchasing_claimed_by, purchasing_claimed_queue_id, purchasing_claimed_clerk_user_id FROM participants WHERE id = ? AND event_id = ?'
+  ).bind(pid, eventId).first<{
+    purchasing_claimed_by: string;
+    purchasing_claimed_queue_id: number | null;
+    purchasing_claimed_clerk_user_id: string | null;
+  }>();
   if (!target) return err('Participant not found', 404);
 
   if (!access.isAdmin) {
@@ -821,14 +835,16 @@ app.post('/api/events/:id/participants/:pid/unclaim', async (c) => {
       ).bind(target.purchasing_claimed_queue_id, eventId).first<{ clerk_user_id: string }>();
       ownsPlace = place?.clerk_user_id === access.userId;
     }
-    if (!ownsPlace && (!myName || claimedBy !== myName)) {
+    const ownsClaim = target.purchasing_claimed_clerk_user_id === access.userId;
+    if (!ownsPlace && !ownsClaim && (!myName || claimedBy !== myName)) {
       return err('Only the person who claimed them can release the claim', 403);
     }
   }
 
   await c.env.DB.prepare(`
     UPDATE participants
-    SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
+    SET purchasing_claimed_by = '', purchasing_claimed_clerk_user_id = NULL,
+        purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
     WHERE id = ? AND event_id = ?
   `).bind(pid, eventId).run();
 
@@ -927,7 +943,8 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   if (claimReleased) {
     await c.env.DB.prepare(`
       UPDATE participants
-      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL,
+      SET purchasing_claimed_by = '', purchasing_claimed_clerk_user_id = NULL,
+          purchasing_claimed_at = NULL,
           purchasing_claimed_queue_id = CASE WHEN ? THEN purchasing_claimed_queue_id ELSE NULL END,
           updated_at = datetime('now')
       WHERE id = ? AND event_id = ?
@@ -1070,7 +1087,8 @@ function canManageQueueEntry(access: { isAdmin: boolean; userId: string }, owner
 function releasePlaceClaims(db: D1Database, placeIdsSql: string, ...binds: (string | number)[]) {
   return db.prepare(`
     UPDATE participants
-    SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL,
+    SET purchasing_claimed_by = '', purchasing_claimed_clerk_user_id = NULL,
+        purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL,
         updated_at = datetime('now')
     WHERE purchasing_claimed_queue_id IN (${placeIdsSql})
   `).bind(...binds);
@@ -1078,9 +1096,14 @@ function releasePlaceClaims(db: D1Database, placeIdsSql: string, ...binds: (stri
 
 async function listPurchaseQueue(db: D1Database, eventId: number): Promise<PurchaseQueueRow[]> {
   const rows = await db.prepare(`
-    SELECT q.*, p.first_name, p.last_name, p.member_id, g.name AS group_name
+    SELECT q.id, q.event_id, q.participant_id, q.clerk_user_id, q.position, q.status,
+           q.eta_minutes, q.eta_at, q.label, q.joined_at, q.updated_at,
+           COALESCE(NULLIF(p.first_name, ''), NULLIF(q.buyer_name, ''), 'Helper') AS first_name,
+           COALESCE(p.last_name, '') AS last_name,
+           COALESCE(p.member_id, '') AS member_id,
+           g.name AS group_name
     FROM purchase_queue q
-    JOIN participants p ON p.id = q.participant_id
+    LEFT JOIN participants p ON p.id = q.participant_id
     LEFT JOIN groups g ON g.id = p.group_id
     WHERE q.event_id = ?
     ORDER BY
@@ -1124,18 +1147,19 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   const me = await c.env.DB.prepare(
     'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
   ).bind(eventId, access.userId).first<{ id: number }>();
-  if (!me) return err('Link your account to a participant first', 400);
 
-  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+  const body = await c.req.json<{ label?: string; buyer_name?: string }>().catch(() => ({} as { label?: string; buyer_name?: string }));
 
   // Multiple joins allowed — one entry per Queue-It cookie / browser session.
   // Position is chosen inside the insert so two people joining at once can't land on the same number.
+  // A helper who is not on the board still gets a place; their name is buyer_name.
   const label = cleanQueueLabel(body.label) || await nextDefaultQueueLabel(c.env.DB, eventId, access.userId);
+  const buyerName = me ? '' : (body.buyer_name?.trim() || 'Helper');
 
   await c.env.DB.prepare(`
-    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status, label)
-    VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM purchase_queue WHERE event_id = ?), 'waiting', ?)
-  `).bind(eventId, me.id, access.userId, eventId, label).run();
+    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, buyer_name, position, status, label)
+    VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM purchase_queue WHERE event_id = ?), 'waiting', ?)
+  `).bind(eventId, me?.id ?? null, access.userId, buyerName, eventId, label).run();
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
@@ -1530,9 +1554,9 @@ app.post('/api/events/:id/purchase-queue/:qid/move', async (c) => {
 });
 
 /**
- * Called out mid-sale by whoever sees Comic-Con's "sold out" screen first, so anyone with a
- * row on this event may flip it, not just admins. Reversible, because a day that looked
- * gone sometimes comes back when carts expire.
+ * Called out mid-sale by whoever sees Comic-Con's "sold out" screen first. Anyone signed
+ * in can flip it, including a helper who is not on the board. Reversible, because a day
+ * that looked gone sometimes comes back when carts expire.
  */
 app.patch('/api/events/:id/sold-out', async (c) => {
   const eventId = Number(c.req.param('id'));
@@ -1541,13 +1565,6 @@ app.patch('/api/events/:id/sold-out', async (c) => {
 
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
-
-  if (!access.isAdmin) {
-    const member = await c.env.DB.prepare(
-      'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ? LIMIT 1'
-    ).bind(eventId, access.userId).first();
-    if (!member) return err('Only people in this event can mark a day sold out', 403);
-  }
 
   const body = await c.req.json<{ day?: string; sold_out?: boolean }>();
   if (!SALE_DAYS.includes(body.day as SaleDay)) {
@@ -3030,7 +3047,8 @@ admin.patch('/events/:id/purchase-queue/:qid/owner', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare(`
       UPDATE participants
-      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL,
+      SET purchasing_claimed_by = '', purchasing_claimed_clerk_user_id = NULL,
+          purchasing_claimed_at = NULL,
           purchasing_claimed_queue_id = CASE
             WHEN pur_preview OR pur_thu OR pur_fri OR pur_sat OR pur_sun THEN purchasing_claimed_queue_id
             ELSE NULL END,

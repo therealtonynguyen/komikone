@@ -7,6 +7,7 @@ import {
   type YearMember, type Year, type Participant, type Group,
   type EventSummary, type Invite, type Profile,
 } from '../lib/api';
+import { pickLiveBoard } from '../lib/liveBoard';
 
 export type GroupView = { group: Group | null; participants: Participant[]; event: EventSummary };
 
@@ -25,6 +26,8 @@ type DashboardContextValue = {
   selfParticipant: Participant | undefined;
   familyParticipants: Participant[];
   activeEvent: EventSummary | undefined;
+  /** The board people should open now, which can differ from the event they are registered for. */
+  liveBoardEvent: EventSummary | undefined;
   registrationOpen: boolean;
   reload: () => Promise<void>;
   saveSelf: (data: {
@@ -187,6 +190,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     (p) => p.clerk_user_id !== member?.clerk_user_id
   ) ?? [];
   const activeEvent = primaryView?.event;
+  const liveBoardEvent = pickLiveBoard(groupViews.map((v) => v.event));
   const registrationOpen = activeEvent?.status === 'registration';
 
   const saveSelf = useCallback(async (data: {
@@ -236,6 +240,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     selfParticipant,
     familyParticipants,
     activeEvent,
+    liveBoardEvent,
     registrationOpen,
     reload: async () => { if (selectedYearId !== null) await loadYear(selectedYearId); },
     saveSelf,
