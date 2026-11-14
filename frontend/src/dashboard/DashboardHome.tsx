@@ -81,7 +81,7 @@ function LiveBoardTile({ event, hasMemberId }: { event: EventSummary; hasMemberI
 }
 
 export default function DashboardHome() {
-  const { member, primaryView, activeEvent } = useDashboard();
+  const { member, primaryView, activeEvent, liveBoardEvent } = useDashboard();
 
   if (!member) {
     const invite = pendingInvite();
@@ -115,11 +115,11 @@ export default function DashboardHome() {
           {activeEvent && (activeEvent.status === 'payment' || activeEvent.status === 'complete') && (
             <PaybackTile eventId={activeEvent.id} title="Who you owe" />
           )}
-          {activeEvent && (
-            <LiveBoardTile event={activeEvent} hasMemberId={!!member.member_id?.trim()} />
+          {liveBoardEvent && (
+            <LiveBoardTile event={liveBoardEvent} hasMemberId={!!member.member_id?.trim()} />
           )}
-          {activeEvent && activeEvent.status === 'purchasing' && (
-            <PaybackTile eventId={activeEvent.id} title="Who to pay" />
+          {liveBoardEvent && liveBoardEvent.status === 'purchasing' && (
+            <PaybackTile eventId={liveBoardEvent.id} title="Who to pay" />
           )}
           <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-300/80 dark:border-gray-700/80 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 mb-4">
